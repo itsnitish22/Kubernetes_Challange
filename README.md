@@ -1,67 +1,53 @@
-# Digital Ocean K8 Challenge
+# Digital Ocean Kubernetes Challenge
 
 Repo for the Digital Ocean K8s Challenge
 
 ## Challenge
 
-Deploy a Log Monitoring stack. Decided to go with ELK (fairly standard), builidng in Filebeats and Logstash for internal cluster monitoring.
-
-Kibana front-end can be viewed [here](https://159.65.208.143/) (a password is necessary, contact me if you want to view).
+Deploy a Log Monitoring system.
 
 ## Solution
 
-I decided to undertake this challenge using only Manifests, apart from the deployment of the ECK Operator, for which I used a Helm repo.
-Initially started with the deployment of Elasticsearch and Kibana, to ensure a base for the logging stack. The manifest for both are in the file elastic_kibana.yaml.
-
-One thing to note that was a challenge was managing resources. I found myself having to resize my pods regularly as I wanted to deploy more services. Perhaps this is due to my lack of forsight, understanding of node resourcing, or something left to be learned in my way-of-working with Kubernetes.
-
-<p align="center">
-  <img src="https://github.com/harrywm/do-k8-challenge/blob/master/resources/dashboard.png?raw=true" alt="Dashboard"/>
-</p>
-
-## Working with Digital Ocean and `kubectl`
-
-Configuring `kubectl` to work with Digital Ocean and the associated cluster was simple. Using the `doctl` CLI to configure my Digital Ocean credentials, then following simple instructions on passing the cluster information to my `kubeconfig`, I was quickly able to get started investigating and working with the cluster.
-
-`doctl k8s cluster kubecfg save`
-
-## Notable Debugging 
-
-### Grokin' around the Christmas Tree
-
-During the deployment of Logstash, I found myself spending a lot of time reconfiguring the Logstash Config-map, which contained the Grok filter for filtering logs coming into the pipeline. I tried many different Grok interpreters online but in the end settled on no filter, as I wasn't focusing on any specific logs. Though I do understand the benefit of filters, and can see how they may be applied to aggregated logging across a large microservice architecture using many different technologies.
-
-Interestingly, Kibana dashboards were a hugely beneficial tool in finding and monitoring this issue. I developed a dashboard tracking the count of logs being indexed from Logstash (`index: logstash-*`) in a line graph, and matched against the count of logs being ingested with the tag `_grokfailure`. This allowed me to follow the impact of the changes I was making to the stack. As I re-configured and re-deployed Logstash and Logstash-configmap I could track that logs were in fact being indexed, and how many of them were attributable to a Grok filtering failure!
-
-<p align="center">
-  <img src="https://github.com/harrywm/do-k8-challenge/blob/master/resources/grokfailure.png?raw=true" alt="Grok Failure"/>
-</p>
-
-### "master_not_discovered_exception"
-
-Resourcing Issues! As mentioned above, I had some trouble with finding the sweet spot for my pod resources. This involved a lot of `kubectl apply -f .`, `kubectl describe nodes` and rejigging of resource requests. You can see what I've settled on in each manifest for the services. This results in a full deployment on the highest spec nodes available on Digital Ocean within the challenge credit range. 
-
-Debugging this was a bit of a task. It started with wondering why I couldn't get a healthcheck from my Elasticsearch URL. 
-To make the whole ordeal a bit simpler, I forwarded the Elasticsearch port from the HTTP Service I spun up with the deployment.
-
-<p align="center">
-  <img src="https://github.com/harrywm/do-k8-challenge/blob/master/resources/portforward.PNG?raw=true" alt="Port Forwarding"/>
-</p>
-                                     
-This allowed me to reach ES at localhost:9200, rather than having to keep the external IP of the service on hand. 
-Hitting any ES endpoint, even a healthcheck, resulted in this painful error: 
-
-`{"error":{"root_cause":[{"type":"master_not_discovered_exception","reason":null}],"type":"master_not_discovered_exception","reason":null},"status":503}`
-
-I later found out this is due to the Elasticsearch cluster configuration not being able to delegate a master node! Which in turn was due to a lack of resources on my K8 nodes, stopping the deployment from being able to achieve 3 pods. 1 master and 2 worker (ES) nodes. Eventually after a few different configuration changes, I settled on a collection of values that worked for the nodes available, while also being able to maintain a Logstash pod, Filebeat daemonset, Kibana deployment and the ECK Operator.
-
-## Resources
-
- - https://raphaeldelio.medium.com/deploy-the-elastic-stack-in-kubernetes-with-the-elastic-cloud-on-kubernetes-eck-b51f667828f9
- - https://www.digitalocean.com/community/tutorials/how-to-install-elasticsearch-logstash-and-kibana-elastic-stack-on-ubuntu-20-04
- - https://www.densify.com/kubernetes-tools/kubernetes-resource-limits
- - https://opster.com/guides/elasticsearch/operations/elasticsearch-master-node-not-discovered/
- - https://sookocheff.com/post/kubernetes/understanding-kubernetes-networking-model/#pod-to-service
- - https://unofficial-kubernetes.readthedocs.io/en/latest/concepts/workloads/controllers/daemonset/
- - http://www.yamllint.com/
- - https://artifacthub.io/packages/helm/elastic/eck-operator
+We will store our state in a space bucket (Equivalent to an S3 bucket)
+Head to spaces and create a space named kube-terraform-state
+Generate an API key for your doctl tool.
+API -> Generate New Token
+Make it read/write as it will be used for all the operations we will be doing.
+Configure your doctl tool.
+Clone the project repository
+git clone https://github.com/duchaineo1/digitalocean-k8s-challenge
+Explore the Terraform files
+In provider.tf we’re defining the provider we will be using (digitalocean in this case) and we’re defining the variable for the token we created in step 2.
+In main.tf we’re defining our backend, that’s where our state will be stored. Keeping it local wouldn’t be the end of the world in this case but it’s nice to know the state is stored in a safe place. Committing it is risky/bad practice because some secrets can get in the state file. We’re then defining the actual cluster from line 13 to 21.
+Init and apply
+terraform init
+terraform apply enter the token you created in step 2 and confirm.
+The init directive should tell you it initialized the backend in the bucket. The apply will take a couple of minutes before your cluster is provisioned.
+Generate your .kubeconfig file
+doctl kubernetes cluster kubeconfig save do-kubernetes-challenge
+I named my cluster do-kubernetes-challenge so if you changed it in main.tf make sure to change your command accordingly.
+This will replace (or create) your ~/.kube/config and enable you to use kubectl commands against your cluster.
+Test using kubectl cluster-info
+Provisioning our ELK stack
+There is multiple .yml files defining our stack in the elk-stack directory. Feel free to adjust to your needs, I’ve created a bash script to provision all of them at once.
+chmod +x provisioning.sh && ./provisioning.sh
+After a couple of minutes validate the state of our stack kubectl -n kube-logging get pods
+Your nodes need at least 2gb of ram to be able to handle Elasticsearch, if you have made no change to the main.tf file your cluster should be fine.
+I used this documentation for the basis of the stack. Some basic modifications and some debugging was required to make it work.
+Configure Kibana
+kubectl -n kube-logging get pods
+Copy the kibana container name
+Port-forward the kibana container to localhost
+kubectl -n kube-logging port-forward <kibana-container-name> 5601:5601
+Open a browser to localhost:5601
+Configure index pattern
+Bottom left Management -> Index Pattern -> Create Index Pattern
+Add logstash-*
+Choose a filter and create the index
+View your data
+Top left corner Discover
+You should see logs generated with the data associated with it.
+Create a custom container
+Let’s test with a custom container with some specific output. In this case it will be a counter with the date and my username (change it to yours in log-producer.yml).
+kubectl apply -f log-producer.yml
+Filtering by the container name and the stdout of the container should be available in your Kibana.
