@@ -51,3 +51,7 @@ Create a custom container
 Let’s test with a custom container with some specific output. In this case it will be a counter with the date and my username (change it to yours in log-producer.yml).
 kubectl apply -f log-producer.yml
 Filtering by the container name and the stdout of the container should be available in your Kibana.
+
+## Screeenshots
+  ![image](https://user-images.githubusercontent.com/73310532/147379529-f128e7e9-8ffa-4b12-bb8d-b14c34210bd1.png)
+
